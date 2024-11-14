@@ -421,3 +421,122 @@ PIVOT (
     FOR shipperId IN ([1], [2], [3], [4])
 ) AS PivotTable;
 
+
+
+-- HR Schema Views
+-- 1. Employee count by title and company
+SELECT CompanyName, [CEO], [manger] as Managers, [Network administrator] + [Network engineer] as TechStaff
+FROM HR.EmployeeCountByTitleAndCompany
+WHERE [CEO] > 0
+ORDER BY CompanyName;
+
+-- 2. Employee age by title and courtesy
+SELECT title, [rs] as AverageAge
+FROM HR.EmployeeAgeByTitleAndCourtesy
+WHERE [rs] > 30
+ORDER BY [rs] DESC;
+
+-- 3. Employee hire patterns by region
+SELECT HireYear, [WA], [Waterloo]
+FROM HR.EmployeeHirePatternsByRegion
+WHERE HireYear >= 2020
+ORDER BY HireYear;
+
+-- 4. Employee distribution by city and title
+SELECT city, [manger] as Managers, [Network administrator] as AdminStaff
+FROM HR.vw_EmployeeDistributionByCityTitle
+WHERE [manger] > 0
+ORDER BY [manger] DESC;
+
+-- 5. Employee counts by company size and region
+SELECT CompanySize, [WA], [Waterloo]
+FROM HR.vw_EmployeeCountByCompanySizeRegion
+ORDER BY CompanySize;
+
+-- Production Schema Views
+-- 6. Product count by category and supplier
+SELECT supplierId, [Electronics], [Cell Phones], [Books]
+FROM Production.vw_ProductCountByCategorySupplier
+WHERE [Electronics] > 0
+ORDER BY [Electronics] DESC;
+
+-- 7. Average product price by category and supplier
+SELECT supplierId, [Electronics] as ElectronicsAvgPrice, [Books] as BooksAvgPrice
+FROM Production.vw_AvgPriceByCategorySupplier
+WHERE [Electronics] > 100
+ORDER BY [Electronics] DESC;
+
+-- 8. Discontinued product percentage
+SELECT supplierId, [Electronics] as ElectronicsDiscontinued, [Books] as BooksDiscontinued
+FROM Production.vw_DiscontinuedProductPercentage
+WHERE [Electronics] > 0
+ORDER BY [Electronics] DESC;
+
+-- 9. Product tag distribution
+SELECT tagName, [Electronics], [Books], [Beauty]
+FROM Production.vw_ProductTagDistribution
+WHERE [Electronics] > 0
+ORDER BY [Electronics] DESC;
+
+-- 10. Product counts by price range
+SELECT PriceRange, [Electronics], [Books], [Beauty]
+FROM Production.vw_ProductCountsByPriceRange
+ORDER BY PriceRange;
+
+-- Sales Schema Views
+-- 11. Customer distribution by city
+SELECT city, [B2B], [B2C]
+FROM Sales.vw_CustomerDistributionByCity
+WHERE [B2B] > 0
+ORDER BY [B2B] DESC;
+
+-- 12. Frequent customer percentage by region
+SELECT region, [B2B] as B2BFrequent, [B2C] as B2CFrequent
+FROM Sales.vw_FrequentCustomerPercentageByRegion
+ORDER BY [B2B] DESC;
+
+-- 13. Customer concentration by county
+SELECT county, [B2B], [B2C]
+FROM Sales.vw_CustomerConcentrationByCounty
+WHERE [B2B] + [B2C] > 100
+ORDER BY [B2B] DESC;
+
+-- 14. Company affiliation by region
+SELECT region, [Company], [Individual]
+FROM Sales.vw_CompanyAffiliationByRegion
+WHERE [Company] > 0
+ORDER BY [Company] DESC;
+
+-- 15. Customer contact method distribution
+SELECT ContactMethod, [B2B], [B2C]
+FROM Sales.vw_CustomerContactMethodDistribution
+ORDER BY ContactMethod;
+
+-- 16. Order volume by employee quarter
+SELECT employeeId, [Q1], [Q2], [Q3], [Q4]
+FROM Sales.vw_OrderVolumeByEmployeeQuarter
+WHERE [Q1] > 0
+ORDER BY [Q1] DESC;
+
+-- 17. Freight cost by shipper region
+SELECT shipperId, [WA], [Waterloo]
+FROM Sales.vw_FreightCostByShipperRegion
+WHERE [WA] > 50
+ORDER BY [WA] DESC;
+
+-- 18. Shipping delays by region
+SELECT shipperId, [WA] as WADelays, [Waterloo] as WaterlooDelays
+FROM Sales.vw_ShippingDelaysByRegion
+WHERE [WA] > 0
+ORDER BY [WA] DESC;
+
+-- 19. Order values by customer category
+SELECT CustomerCategory, [WA], [Waterloo]
+FROM Sales.vw_OrderValuesByCustomerCategory
+ORDER BY CustomerCategory;
+
+-- 20. Order distribution by employee and shipper
+SELECT employeeId, [1] as Shipper1, [2] as Shipper2, [3] as Shipper3
+FROM Sales.vw_OrderDistributionByEmployeeShipper
+WHERE [1] > 0
+ORDER BY [1] DESC;
