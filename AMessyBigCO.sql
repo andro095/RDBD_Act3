@@ -199,7 +199,7 @@ CREATE TABLE Info.Tag (
 );
 
 -- Start with HR.Companies (combining BIGCO and Messy companies)
-INSERT INTO HR.Companies (companyId, name, contactName, contactTitle)
+INSERT INTO HR.Companies (name, contactName, contactTitle)
 SELECT name,
        contactName,
        contactTitle
@@ -207,17 +207,10 @@ FROM (
     -- Companies from BIGCO
     SELECT DISTINCT name, contactName, contactTitle
     FROM NBIGCO.Production.Companies
-    UNION
-    -- Companies from Messy (deriving from customer data)
-    SELECT DISTINCT 
-           c.name,
-           NULL as contactName,
-           NULL as contactTitle
-    FROM NF.Sales.Customer c
 ) AS CombinedCompanies;
 
 -- Info.Addresses
-INSERT INTO Info.Addresses (addressId, address, city, region, postalCode, county)
+INSERT INTO Info.Addresses (address, city, region, postalCode, county)
 SELECT address, city, region, postalCode, country
 FROM (
     -- Addresses from BIGCO
@@ -231,12 +224,12 @@ FROM (
            city,
            region,
            postalCode,
-           'Unknown' as country
+           'UK' as country
     FROM NF.Sales.Customer
 ) AS CombinedAddresses;
 
 -- Info.Contacts
-INSERT INTO Info.Contacts (contactId, phone, email, fax)
+INSERT INTO Info.Contacts (phone, email, fax)
 SELECT phone, email, fax
 FROM (
     -- Contacts from BIGCO
@@ -250,12 +243,13 @@ FROM (
     SELECT DISTINCT 
            phone,
            email,
-           NULL as fax
+           '' as fax
     FROM NF.Sales.Customer
+    WHERE phone <> '' AND email <> ''
 ) AS CombinedContacts;
 
 -- Production.Categories
-INSERT INTO Production.Categories (categoryId, name, description)
+INSERT INTO Production.Categories (name, description)
 SELECT name,
        description
 FROM (
@@ -267,7 +261,7 @@ FROM (
 ) AS BIGCOCategories;
 
 -- HR.Employees
-INSERT INTO HR.Employees (employeeId,
+INSERT INTO HR.Employees (
         lastName,
         firstName,
         title,
@@ -300,6 +294,19 @@ FROM (
     JOIN Info.Addresses a ON a.address = em.addressId
     JOIN Info.Contacts co ON co.contactId = em.phoneId
 ) AS BIGCOEmployees;
+
+SELECT DISTINCT
+            lastname,
+            firstname,
+            title,
+            courtesyTitle,
+            birthDate,
+            hireDate,
+            em.addressId,
+            phoneId
+    FROM NBIGCO.HR.Employees em
+    JOIN Info.Addresses a ON a.address = em.addressId
+    JOIN Info.Contacts co ON co.contactId = em.phoneId
 
 -- Production.Supliers
 INSERT INTO Production.Suppliers (supplierId, companyID, addressId, contactId)
