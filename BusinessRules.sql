@@ -62,6 +62,7 @@ PIVOT (
 ) AS PivotTable;
 
 -- 5. Employee counts by company size and region
+--- 5. Employee counts by employee count and region
 CREATE VIEW HR.vw_EmployeeCountByCompanySizeRegion AS
 WITH CompanySize AS (
     SELECT
