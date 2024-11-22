@@ -1,4 +1,4 @@
--- Assignment-3
+-- Assignment-4
 
 -- Team Member Names: Dev Bharatbhai Patel
 --					  Zeel Samir Shah
@@ -8,6 +8,7 @@
 -- Task-1
 
 -- Business Rules
+
 -- 1. Calculate Vacation Days Based on Tenure
 -- 2. Update Manager of Employee
 -- 3. Low Inventory Flagging
@@ -18,9 +19,21 @@
 -- 8. Update B2B Order Address
 -- 9. Get Top 3 Promo Codes by usage
 -- 10. Get total sales of a category
+-- 11. Determine High-Value Customers
+-- 12. Top-3 Selling Products in a Category
+-- 13. Dynamic Customer Loyalty Tier Update
+-- 14. Evaluate Supplier Performance
+-- 15. Calculate Total Discounted Sales applied to orders (B2B and B2C)
+-- 16. Product Restocking Recommendation System
+-- 17. Generate Product Profit Margin Report
+-- 18. Analyze Promo Code Effectiveness
+-- 19. Predict Employee Turnover Risk
+-- 20. Customer Type(B2B VS B2C) Revenue Breakdown
 
+-- ###################################################################################################################
 
--- Task-2 Applied Business Rules on Database with Database Procedures
+-- Task-2 Applied Business Rules on Database with Database Procedures/Functions
+
 -- 1. Calculate Vacation Days Based on Tenure
 CREATE FUNCTION HR.CalculateVacationDays(@lastname VARCHAR(50), @firstname VARCHAR(50))
 RETURNS INT
@@ -250,6 +263,229 @@ RETURN
 );
 GO
 
+-- 11. Determine High-Value Customers
+CREATE PROCEDURE Sales.DetermineHighValueCustomers
+    @startDate DATETIME,
+    @endDate DATETIME,
+    @threshold DECIMAL
+AS
+BEGIN
+    SELECT 
+        C.CustomerID,
+        C.CompanyName,
+        SUM(O.Total) AS TotalSpent
+    FROM Sales.Customers AS C
+    INNER JOIN Sales.OrdersB2B AS O ON C.CustomerID = O.CustomerID
+    WHERE O.Date BETWEEN @startDate AND @endDate
+    GROUP BY C.CustomerID, C.CompanyName
+    HAVING SUM(O.Total) > @threshold
+    ORDER BY TotalSpent DESC;
+END;
+GO
+
+-- 12. Top-3 Selling Products in a Category
+CREATE FUNCTION Sales.GetTopSellingProductsByCategory
+    (@categoryId INT, @startDate DATETIME, @endDate DATETIME)
+RETURNS TABLE
+AS
+RETURN
+    SELECT TOP 3 
+        P.ProductID,
+        P.Name AS ProductName,
+        SUM(OD.Quantity) AS TotalQuantitySold
+    FROM Production.Products AS P
+    INNER JOIN Sales.OrderDetailsB2B AS OD ON P.ProductID = OD.ProductID
+    INNER JOIN Sales.OrdersB2B AS O ON OD.OrderID = O.OrderID
+    WHERE P.CategoryID = @categoryId AND O.Date BETWEEN @startDate AND @endDate
+    GROUP BY P.ProductID, P.Name
+    ORDER BY TotalQuantitySold DESC;
+GO
+
+-- 13. Dynamic Customer Loyalty Tier Update
+CREATE PROCEDURE Sales.UpdateLoyaltyTiers
+AS
+BEGIN
+    DECLARE @BronzeThreshold DECIMAL = 5000;
+    DECLARE @SilverThreshold DECIMAL = 10000;
+    DECLARE @GoldThreshold DECIMAL = 12000;
+
+    WITH CustomerSpending AS (
+        SELECT 
+            C.CustomerID,
+            SUM(O.Total) AS TotalSpent
+        FROM Sales.Customers AS C
+        INNER JOIN Sales.OrdersB2B AS O ON C.CustomerID = O.CustomerID
+        WHERE O.Date BETWEEN '2018-01-01' AND '2018-12-31'
+        GROUP BY C.CustomerID
+    )
+    UPDATE Sales.Customers
+    SET CustomerType = 
+        CASE
+            WHEN CS.TotalSpent >= @GoldThreshold THEN 'Platinum'
+            WHEN CS.TotalSpent >= @SilverThreshold THEN 'Gold'
+            WHEN CS.TotalSpent >= @BronzeThreshold THEN 'Silver'
+            ELSE 'Bronze'
+        END
+    FROM Sales.Customers AS C
+    INNER JOIN CustomerSpending AS CS ON C.CustomerID = CS.CustomerID;
+
+    PRINT 'Customer Loyalty Tiers Updated Successfully';
+END;
+GO
+
+-- 14. Evaluate Supplier Performance
+CREATE FUNCTION Sales.GetAverageDeliveryTime(@supplierId INT)
+RETURNS FLOAT
+AS
+BEGIN
+    RETURN (
+        SELECT AVG(DATEDIFF(DAY, O.RequiredDate, O.ShippedDate))
+        FROM Sales.OrdersB2B AS O
+        INNER JOIN Production.Products AS P ON O.OrderID = P.ProductID
+        WHERE P.SupplierID = @supplierId AND O.ShippedDate IS NOT NULL
+    );
+END;
+GO
+
+-- 15. Calculate Total Discounted Sales applied to orders (B2B and B2C)
+CREATE PROCEDURE Sales.CalculateTotalDiscounts
+    @startDate DATETIME,
+    @endDate DATETIME
+AS
+BEGIN
+    SELECT 
+        SUM((Subtotal - Total)) AS TotalDiscount
+    FROM (
+        SELECT Subtotal, Total FROM Sales.OrdersB2B WHERE Date BETWEEN @startDate AND @endDate
+        UNION ALL
+        SELECT Subtotal, Total FROM Sales.OrdersB2C WHERE Date BETWEEN @startDate AND @endDate
+    ) AS Discounts;
+END;
+GO
+
+-- 16. Product Restocking Recommendation System
+CREATE PROCEDURE Production.GetRestockingRecommendations
+AS
+BEGIN
+    WITH ProductSales AS (
+        SELECT 
+            P.ProductID,
+            P.Name AS ProductName,
+            SUM(OD.Quantity) AS TotalSold,
+            DATEDIFF(DAY, MIN(O.Date), MAX(O.Date)) AS TotalDays
+        FROM Production.Products AS P
+        INNER JOIN Sales.OrderDetailsB2B AS OD ON P.ProductID = OD.ProductID
+        INNER JOIN Sales.OrdersB2B AS O ON OD.OrderID = O.OrderID
+        WHERE O.Date >= DATEADD(MONTH, -3, GETDATE())
+        GROUP BY P.ProductID, P.Name
+    ),
+    StockLevels AS (
+        SELECT 
+            PS.ProductID,
+            PS.ProductName,
+            (PS.TotalSold / NULLIF(PS.TotalDays, 0)) * 30 AS RecommendedRestock
+        FROM ProductSales AS PS
+    )
+    SELECT 
+        ProductID,
+        ProductName,
+        RecommendedRestock
+    FROM StockLevels
+    WHERE RecommendedRestock > 0
+    ORDER BY RecommendedRestock DESC;
+END;
+GO
+
+-- 17. Generate Product Profit Margin Report
+CREATE PROCEDURE Production.GetProductProfitMargins
+    @startDate DATETIME,
+    @endDate DATETIME
+AS
+BEGIN
+    SELECT 
+        P.ProductID,
+        P.Name AS ProductName,
+        P.UnitPrice,
+        SUM(OD.Quantity * P.UnitPrice) AS TotalRevenue,
+        SUM(OD.Quantity * (P.UnitPrice - OD.UnitPrice)) AS ProfitMargin
+    FROM Production.Products AS P
+    INNER JOIN Sales.OrderDetailsB2B AS OD ON P.ProductID = OD.ProductID
+    INNER JOIN Sales.OrdersB2B AS O ON OD.OrderID = O.OrderID
+    WHERE O.Date BETWEEN @startDate AND @endDate
+    GROUP BY P.ProductID, P.Name, P.UnitPrice
+    ORDER BY ProfitMargin DESC;
+END;
+GO
+
+-- 18. Analyze Promo Code Effectiveness
+CREATE FUNCTION Sales.GetPromoCodeEffectiveness(@promoCodeId INT)
+RETURNS TABLE
+AS
+RETURN
+    SELECT 
+        PromoCodeID,
+        COUNT(*) AS TotalOrders,
+        SUM(Total) AS TotalRevenueGenerated
+    FROM (
+        SELECT PromoCodeID, Total FROM Sales.OrdersB2B WHERE PromoCodeID = @promoCodeId
+        UNION ALL
+        SELECT PromoCodeID, Total FROM Sales.OrdersB2C WHERE PromoCodeID = @promoCodeId
+    ) AS PromoSales
+    GROUP BY PromoCodeID;
+GO
+
+-- 19. Predict Employee Turnover Risk
+CREATE PROCEDURE HR.PredictEmployeeTurnoverRisk
+AS
+BEGIN
+    DECLARE @LowTenure INT = 2;
+    DECLARE @HighAbsences INT = 10;
+
+    WITH EmployeeData AS (
+        SELECT 
+            E.EmployeeID,
+            E.FirstName,
+            E.LastName,
+            DATEDIFF(YEAR, E.HireDate, GETDATE()) AS Tenure,
+            CASE
+                WHEN DATEDIFF(YEAR, E.HireDate, GETDATE()) < @LowTenure THEN 'High Risk'
+                ELSE 'Low Risk'
+            END AS TurnoverRisk
+        FROM HR.Employees AS E
+    )
+    SELECT 
+        EmployeeID,
+        FirstName,
+        LastName,
+        Tenure,
+        TurnoverRisk
+    FROM EmployeeData
+    ORDER BY TurnoverRisk DESC, Tenure ASC;
+END;
+GO
+
+-- 20. Customer Type(B2B VS B2C) Revenue Breakdown
+CREATE PROCEDURE Sales.GetCustomerTypeRevenueBreakdown
+    @startDate DATETIME,
+    @endDate DATETIME
+AS
+BEGIN
+    SELECT 
+        'B2B' AS CustomerType,
+        SUM(Total) AS TotalRevenue
+    FROM Sales.OrdersB2B
+    WHERE Date BETWEEN @startDate AND @endDate
+    UNION ALL
+    SELECT 
+        'B2C' AS CustomerType,
+        SUM(Total) AS TotalRevenue
+    FROM Sales.OrdersB2C
+    WHERE Date BETWEEN @startDate AND @endDate;
+END;
+GO
+
+
+-- ###################################################################################################################
 
 -- Task-3 Test the Business Rules
 -- 1. Calculate Vacation Days Based on Tenure
@@ -303,3 +539,45 @@ SELECT * FROM Sales.GetTop3PromoCodes();
 
 -- 10. Get total sales of a category
 SELECT * FROM Sales.GetTotalSalesByCategory('Electronics');
+
+-- 11. Determine High-Value Customers
+EXEC Sales.DetermineHighValueCustomers 
+    @startDate = '2018-01-01', 
+    @endDate = '2018-12-31', 
+    @threshold = 10000;
+
+-- 12. Top-3 Selling Products in a Category
+SELECT * FROM Sales.GetTopSellingProductsByCategory( 1, '2018-01-01', '2018-12-31');
+
+-- 13. Dynamic Customer Loyalty Tier Update
+EXEC Sales.UpdateLoyaltyTiers;
+
+-- Check if customertype is updated or not
+SELECT CustomerID, CustomerType FROM Sales.Customers;
+
+-- 14. Evaluate Supplier Performance
+SELECT Sales.GetAverageDeliveryTime(1) AS AverageDeliveryTime;
+
+-- 15. Calculate Total Discounted Sales applied to orders (B2B and B2C)
+EXEC Sales.CalculateTotalDiscounts 
+    @startDate = '2018-01-01', 
+    @endDate = '2018-12-31';
+
+-- 16. Product Restocking Recommendation System
+EXEC Production.GetRestockingRecommendations;
+
+-- 17. Generate Product Profit Margin Report
+EXEC Production.GetProductProfitMargins 
+    @startDate = '2018-01-01', 
+    @endDate = '2018-12-31';
+
+-- 18. Analyze Promo Code Effectiveness
+SELECT * FROM Sales.GetPromoCodeEffectiveness(1);
+
+-- 19. Predict Employee Turnover Risk
+EXEC HR.PredictEmployeeTurnoverRisk;
+
+-- 20. Customer Type(B2B VS B2C) Revenue Breakdown
+EXEC Sales.GetCustomerTypeRevenueBreakdown 
+    @startDate = '2018-01-01', 
+    @endDate = '2018-12-31';
