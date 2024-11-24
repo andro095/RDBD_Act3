@@ -29,6 +29,16 @@
 -- 18. Analyze Promo Code Effectiveness
 -- 19. Predict Employee Turnover Risk
 -- 20. Customer Type(B2B VS B2C) Revenue Breakdown
+-- 21. Get products without orders in last 30 days
+-- 22. Find customers with no orders
+-- 23. Calculate average delivery time for B2B orders
+-- 24. List products with price higher than category average
+-- 25. Find suppliers with no active products
+-- 26. Calculate shipping cost percentage of total order value
+-- 27. Find products never ordered by B2C customers
+-- 28. Calculate orders per employee per month
+-- 29. List customers who ordered all products in a category
+-- 30. Find address used by multiple customers
 
 -- ###################################################################################################################
 
@@ -484,6 +494,298 @@ BEGIN
 END;
 GO
 
+-- 21. Get products without orders in last 30 days
+CREATE PROCEDURE Production.GetProductsWithoutOrders
+AS
+BEGIN
+    DECLARE @LastMonthDate DATE = DATEADD(DAY, -30, GETDATE());
+
+    -- Create temporary table for recent orders
+    CREATE TABLE #RecentOrders (
+        productId INT PRIMARY KEY
+    );
+
+    -- Insert B2B orders
+    INSERT INTO #RecentOrders (productId)
+    SELECT DISTINCT od.productId
+    FROM Sales.OrderDetailsB2B od
+    JOIN Sales.OrdersB2B o ON od.orderId = o.orderId
+    WHERE o.date > @LastMonthDate;
+
+    -- Insert B2C orders
+    INSERT INTO #RecentOrders (productId)
+    SELECT DISTINCT od.productId
+    FROM Sales.OrderDetailsB2C od
+    JOIN Sales.OrdersB2C o ON od.orderId = o.orderId
+    WHERE o.date > @LastMonthDate
+    AND NOT EXISTS (
+        SELECT 1 FROM #RecentOrders r
+        WHERE r.productId = od.productId
+    );
+
+    -- Get products without recent orders
+    SELECT
+        p.productId,
+        p.name,
+        p.unitPrice,
+        c.name AS CategoryName,
+        s.companyName AS SupplierName,
+        CASE
+            WHEN p.discontinued = 1 THEN 'Discontinued'
+            ELSE 'Active'
+        END AS ProductStatus
+    FROM Production.Products p
+    LEFT JOIN #RecentOrders r ON p.productId = r.productId
+    JOIN Production.Categories c ON p.categoryId = c.categoryId
+    JOIN Production.Suppliers s ON p.supplierId = s.supplierId
+    WHERE r.productId IS NULL
+    ORDER BY
+        c.name,
+        p.name;
+
+    -- Drop temporary table
+    DROP TABLE #RecentOrders;
+END;
+GO
+
+-- Create index to improve performance
+CREATE NONCLUSTERED INDEX IX_OrdersB2B_Date ON Sales.OrdersB2B(date);
+CREATE NONCLUSTERED INDEX IX_OrdersB2C_Date ON Sales.OrdersB2C(date);
+
+-- 22. Find customers who have spent more than $10,000 in total purchases
+CREATE PROCEDURE Sales.GetHighValueCustomers
+    @MinimumSpent DECIMAL(18,2) = 10000.00
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    -- Get high value customers from both B2B and B2C
+    SELECT
+        c.customerId,
+        c.companyName as CustomerName,
+        c.customerType,
+        c.city,
+        c.country,
+        COALESCE(B2B_Sales.TotalSpent, 0) + COALESCE(B2C_Sales.TotalSpent, 0) as TotalSpent,
+        COALESCE(B2B_Sales.OrderCount, 0) + COALESCE(B2C_Sales.OrderCount, 0) as TotalOrders
+    FROM Sales.Customers c
+    -- Get B2B sales
+    LEFT JOIN (
+        SELECT
+            customerId,
+            SUM(total) as TotalSpent,
+            COUNT(*) as OrderCount
+        FROM Sales.OrdersB2B
+        GROUP BY customerId
+    ) B2B_Sales ON c.customerId = B2B_Sales.customerId
+    -- Get B2C sales
+    LEFT JOIN (
+        SELECT
+            customerId,
+            SUM(total) as TotalSpent,
+            COUNT(*) as OrderCount
+        FROM Sales.OrdersB2C
+        GROUP BY customerId
+    ) B2C_Sales ON c.customerId = B2C_Sales.customerId
+    WHERE COALESCE(B2B_Sales.TotalSpent, 0) + COALESCE(B2C_Sales.TotalSpent, 0) > @MinimumSpent
+    ORDER BY TotalSpent DESC;
+END;
+GO
+
+-- 23. Calculate delivery time by shipper
+CREATE PROCEDURE Sales.GetAverageDeliveryTime
+AS
+BEGIN
+    -- Overall shipper delivery time
+    SELECT
+        s.name as ShipperName,
+        COUNT(*) as TotalDeliveries,
+        AVG(CAST(DATEDIFF(day, requiredDate, shippedDate) AS DECIMAL(10,2))) as AvgDeliveryDays,
+        SUM(CASE WHEN shippedDate <= requiredDate THEN 1 ELSE 0 END) as OnTimeDeliveries,
+        CAST(SUM(CASE WHEN shippedDate <= requiredDate THEN 1 ELSE 0 END) * 100.0 / COUNT(*) AS DECIMAL(5,2)) as OnTimePercentage
+    FROM Sales.OrdersB2B o
+    JOIN Sales.Shippers s ON o.shipperId = s.shipperId
+    GROUP BY s.shipperId, s.name
+    ORDER BY OnTimePercentage DESC;
+
+    -- Monthly trend
+    SELECT
+        FORMAT(shippedDate, 'yyyy-MM') as Month,
+        s.name as ShipperName,
+        COUNT(*) as Deliveries,
+        AVG(CAST(DATEDIFF(day, requiredDate, shippedDate) AS DECIMAL(10,2))) as AvgDeliveryDays
+    FROM Sales.OrdersB2B o
+    JOIN Sales.Shippers s ON o.shipperId = s.shipperId
+    GROUP BY FORMAT(shippedDate, 'yyyy-MM'), s.shipperId, s.name
+    ORDER BY Month DESC, Deliveries DESC;
+END;
+GO
+
+-- 24. List products with unit price higher than category average
+CREATE PROCEDURE Production.GetProductsAboveCategoryAverage
+AS
+BEGIN
+    WITH CategoryAverages AS (
+        SELECT
+            categoryId,
+            AVG(unitPrice) as AveragePrice
+        FROM Production.Products
+        GROUP BY categoryId
+    )
+    SELECT
+        p.productId,
+        p.name,
+        p.unitPrice,
+        c.name as Category
+    FROM Production.Products p
+    JOIN Production.Categories c ON p.categoryId = c.categoryId
+    JOIN CategoryAverages ca ON p.categoryId = ca.categoryId
+    WHERE p.unitPrice > ca.AveragePrice
+    ORDER BY c.name, p.unitPrice DESC;
+END;
+GO
+
+-- 25. Find suppliers with no active products
+CREATE PROCEDURE Production.GetSuppliersWithNoActiveProducts
+AS
+BEGIN
+    SELECT
+        s.supplierId,
+        s.companyName,
+        s.contactName,
+        s.city,
+        s.country,
+        COUNT(p.productId) as TotalProducts,
+        SUM(CASE WHEN p.discontinued = 1 THEN 1 ELSE 0 END) as DiscontinuedProducts,
+        SUM(CASE WHEN p.discontinued = 0 THEN 1 ELSE 0 END) as ActiveProducts
+    FROM Production.Suppliers s
+    LEFT JOIN Production.Products p ON s.supplierId = p.supplierId
+    GROUP BY
+        s.supplierId,
+        s.companyName,
+        s.contactName,
+        s.city,
+        s.country
+    HAVING SUM(CASE WHEN p.discontinued = 0 THEN 1 ELSE 0 END) = 0
+        OR COUNT(p.productId) = 0
+    ORDER BY s.companyName;
+END;
+GO
+
+-- 26. Calculate shipping cost percentage of total order value
+CREATE PROCEDURE Sales.CalculateShippingCostPercentage
+AS
+BEGIN
+    SELECT
+        orderId,
+        freight,
+        subtotal as OrderValue,
+        CAST((freight / NULLIF(subtotal, 0)) * 100 as DECIMAL(10,2)) as FreightPercentage
+    FROM Sales.OrdersB2B
+    WHERE subtotal > 0
+    ORDER BY orderId;
+END;
+GO
+
+-- 27. Find products never ordered by customers
+CREATE PROCEDURE Sales.GetProductsNeverOrdered
+AS
+BEGIN
+    SELECT
+        p.productId,
+        p.name
+    FROM Production.Products p
+    WHERE NOT EXISTS (
+        SELECT 1
+        FROM Sales.OrderDetailsB2B b2b
+        WHERE b2b.productId = p.productId
+    )
+    AND NOT EXISTS (
+        SELECT 1
+        FROM Sales.OrderDetailsB2C b2c
+        WHERE b2c.productId = p.productId
+    )
+    ORDER BY p.name;
+END;
+GO
+
+-- 28. Calculate orders per employee per month
+CREATE PROCEDURE Sales.OrdersPerEmployeePerMonth
+AS
+BEGIN
+    SELECT e.employeeId, e.lastName,
+           MONTH(o.requiredDate) as Month,
+           COUNT(*) as OrderCount
+    FROM HR.Employees e
+    JOIN Sales.OrdersB2B o ON e.employeeId = o.employeeId
+    GROUP BY e.employeeId, e.lastName, MONTH(o.requiredDate);
+END;
+
+-- 29. List customers who ordered all products in a category
+CREATE PROCEDURE Sales.CustomersOrderedAllProductsInCategory
+AS
+BEGIN
+    SELECT c.companyName, ca.name as CategoryName
+    FROM Sales.Customers c
+    JOIN Sales.OrdersB2B o ON c.customerId = o.customerId
+    JOIN Sales.OrderDetailsB2B od ON o.orderId = od.orderId
+    JOIN Production.Products p ON od.productId = p.productId
+    JOIN Production.Categories ca ON p.categoryId = ca.categoryId
+    GROUP BY ca.name, ca.categoryId, c.companyName
+    HAVING COUNT(DISTINCT p.productId) = (
+        SELECT COUNT(*)
+        FROM Production.Products
+        WHERE categoryId = ca.categoryId
+    );
+END;
+GO
+
+-- 30. Find address used by multiple customers
+CREATE PROCEDURE Sales.GetSharedAddresses
+AS
+BEGIN
+    SELECT
+        address,
+        city,
+        region,
+        country,
+        COUNT(DISTINCT customerId) as CustomerCount,
+        STRING_AGG(companyName, ', ') as Companies
+    FROM Sales.Customers
+    GROUP BY
+        address,
+        city,
+        region,
+        country
+    HAVING COUNT(DISTINCT customerId) > 1
+    ORDER BY
+        CustomerCount DESC,
+        city,
+        address;
+
+    -- Additional breakdown by customer type
+    SELECT
+        address,
+        city,
+        region,
+        country,
+        customerType,
+        COUNT(DISTINCT customerId) as CustomerCount
+    FROM Sales.Customers
+    GROUP BY
+        address,
+        city,
+        region,
+        country,
+        customerType
+    HAVING COUNT(DISTINCT customerId) > 1
+    ORDER BY
+        CustomerCount DESC,
+        customerType,
+        city,
+        address;
+END;
+GO
 
 -- ###################################################################################################################
 
@@ -581,3 +883,33 @@ EXEC HR.PredictEmployeeTurnoverRisk;
 EXEC Sales.GetCustomerTypeRevenueBreakdown 
     @startDate = '2018-01-01', 
     @endDate = '2018-12-31';
+
+--- 21. Get products without orders in last 30 days
+EXEC Production.GetProductsWithoutOrders;
+
+--- 22. Find customers who have spent more than $10,000 in total purchases
+EXEC Sales.GetHighValueCustomers @MinimumSpent = 10000;
+
+--- 23. Calculate delivery time by shipper
+EXEC Sales.GetAverageDeliveryTime;
+
+--- 24. List products with unit price higher than category average
+EXEC Production.GetProductsAboveCategoryAverage;
+
+--- 25. Find suppliers with no active products
+EXEC Production.GetSuppliersWithNoActiveProducts;
+
+--- 26. Calculate shipping cost percentage of total order value
+EXEC Sales.CalculateShippingCostPercentage;
+
+--- 27. Find products never ordered by customers
+EXEC Sales.GetProductsNeverOrdered;
+
+--- 28. Calculate orders per employee per month
+EXEC Sales.OrdersPerEmployeePerMonth;
+
+--- 29. List customers who ordered all products in a category
+EXEC Sales.CustomersOrderedAllProductsInCategory;
+
+--- 30. Find address used by multiple customers
+EXEC Sales.GetSharedAddresses;
