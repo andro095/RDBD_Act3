@@ -94,6 +94,8 @@ GO;
 
 -- 3. Low Inventory Flagging
 CREATE PROCEDURE Production.FlagLowInventoryProducts
+    @criticalThreshold INT = 10,
+    @lowThreshold INT = 50
 AS
 BEGIN
     SELECT
@@ -101,8 +103,8 @@ BEGIN
         p.name,
         SUM(od.quantity) AS totalSold,
         CASE
-            WHEN SUM(od.quantity) < 10 THEN 'Critical Low'
-            WHEN SUM(od.quantity) < 50 THEN 'Low'
+            WHEN SUM(od.quantity) < @criticalThreshold THEN 'Critical Low'
+            WHEN SUM(od.quantity) < @lowThreshold THEN 'Low'
             ELSE 'Normal'
         END AS inventoryStatus
     FROM Production.Products p
@@ -115,13 +117,15 @@ GO
 
 -- 4. Frequent Buyer Status Upgrade/Downgrade
 CREATE PROCEDURE Sales.UpdateCustomerFrequentBuyerStatus
+    @orderCountThreshold INT = 10,
+    @orderCountLowThreshold INT = 5
 AS
 BEGIN
     UPDATE Sales.Customers
     SET frequentBuyer =
         CASE
-            WHEN orderCount >= 10 THEN 1
-            WHEN orderCount < 5 THEN 0
+            WHEN orderCount >= @orderCountThreshold THEN 1
+            WHEN orderCount < @orderCountLowThreshold THEN 0
             ELSE frequentBuyer
         END
     FROM Sales.Customers c
@@ -161,7 +165,7 @@ END;
 GO
 
 -- 6. Age-based HR Analytics
-CREATE FUNCTION HR.GetWorkforceDemographics()
+CREATE FUNCTION HR.GetWorkforceDemographics(@retirementAge INT = 65)
 RETURNS TABLE
 AS
 RETURN
@@ -178,7 +182,7 @@ RETURN
                 ELSE 'Over 60'
             END AS AgeGroup,
             CASE
-                WHEN DATEDIFF(YEAR, birthDate, DATEADD(YEAR, 65, hireDate)) <= 5 THEN 1
+                WHEN DATEDIFF(YEAR, birthDate, DATEADD(YEAR, @retirementAge, hireDate)) <= 5 THEN 1
                 ELSE 0
             END AS NearingRetirement
         FROM HR.Employees
@@ -195,7 +199,7 @@ RETURN
 GO
 
 -- 7. Sales Territory Analysis
-CREATE FUNCTION Sales.GetTerritoryPerformance()
+CREATE FUNCTION Sales.GetTerritoryPerformance(@analysisCount INT = 0)
 RETURNS TABLE
 AS
 RETURN
@@ -212,7 +216,7 @@ RETURN
         t.region,
         t.CustomerCount,
         t.FrequentBuyerCount,
-        CAST(t.FrequentBuyerCount AS FLOAT) / NULLIF(t.CustomerCount, 0) AS FrequentBuyerRatio
+        CAST(t.FrequentBuyerCount AS FLOAT) / NULLIF(t.CustomerCount, @analysisCount) AS FrequentBuyerRatio
     FROM TerritoryStats t
 );
 GO
@@ -239,8 +243,8 @@ BEGIN
 END;
 GO
 
--- 9. Get Top 3 Promo Codes by usage
-CREATE FUNCTION Sales.GetTop3PromoCodes()
+-- 9. Get Top Promo Codes by usage
+CREATE FUNCTION Sales.GetTopPromoCodes(@topCount INT = 3)
 RETURNS TABLE
 AS
 RETURN
@@ -253,7 +257,7 @@ RETURN
     WHERE ord.promoCodeId IS NOT NULL
     GROUP BY pc.code
     ORDER BY UsageCount DESC
-    OFFSET 0 ROWS FETCH NEXT 3 ROWS ONLY
+    OFFSET 0 ROWS FETCH NEXT @topCount ROWS ONLY
 );
 GO
 
@@ -720,6 +724,7 @@ BEGIN
     JOIN Sales.OrdersB2B o ON e.employeeId = o.employeeId
     GROUP BY e.employeeId, e.lastName, MONTH(o.requiredDate);
 END;
+GO;
 
 -- 29. List customers who ordered all products in a category
 CREATE PROCEDURE Sales.CustomersOrderedAllProductsInCategory
@@ -809,19 +814,23 @@ FROM HR.Employees
 WHERE LastName = 'Nikia' AND FirstName = 'Smiley';
 
 -- 3. Low Inventory Flagging
-EXEC Production.FlagLowInventoryProducts;
+EXEC Production.FlagLowInventoryProducts
+    @criticalThreshold = 10,
+    @lowThreshold = 35;
 
 -- 4. Frequent Buyer Status Upgrade/Downgrade
-EXEC Sales.UpdateCustomerFrequentBuyerStatus;
+EXEC Sales.UpdateCustomerFrequentBuyerStatus
+    @orderCountThreshold = 10,
+    @orderCountLowThreshold = 5;
 
 -- 5. Employee Sales Performance
 EXEC HR.CalculateEmployeePerformance @StartDate = '2018-01-01', @EndDate = '2018-12-31';
 
 -- 6. Age-based HR Analytics
-SELECT * FROM HR.GetWorkforceDemographics();
+SELECT * FROM HR.GetWorkforceDemographics(65);
 
 -- 7. Sales Territory Analysis
-SELECT * FROM Sales.GetTerritoryPerformance();
+SELECT * FROM Sales.GetTerritoryPerformance(0);
 
 -- 8. Update B2B Order Address
 SELECT * FROM Sales.OrdersB2B WHERE orderId = 4;
@@ -837,7 +846,7 @@ EXEC Sales.UpdateB2BOrderAddress
 SELECT * FROM Sales.OrdersB2B WHERE orderId = 4;
 
 -- 9. Get Top 3 Promo Codes by usage
-SELECT * FROM Sales.GetTop3PromoCodes();
+SELECT * FROM Sales.GetTopPromoCodes(4);
 
 -- 10. Get total sales of a category
 SELECT * FROM Sales.GetTotalSalesByCategory('Electronics');
