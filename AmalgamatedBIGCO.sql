@@ -274,7 +274,10 @@ INSERT INTO Sales.PromoCodes (code, discountPc, discountAbs)
 SELECT code, discountPc, discountAbs
 FROM NF.Sales.PromoCode;
 
+
 -- Insert Orders B2B
+GO;
+
 CREATE VIEW vm_OrderTotals AS
 SELECT orderid, (unitprice * qty) AS subtotal, (unitprice * qty * (1 - discount)) AS total
 FROM BIGCO.Sales.OrderDetails;
@@ -288,7 +291,7 @@ INNER JOIN vm_OrderTotals ot ON ord.orderid = ot.orderid;
 
 -- Insert Orders B2C
 INSERT INTO Sales.OrdersB2C (date, subtotal, total, customerId, promoCodeId)
-SELECT ord.date, ord.subTotal, ord.total, cust.customerId, ord.PromoCodeId - 33
+SELECT ord.date, ord.subTotal, ord.total, cust.customerId, ord.PromoCodeId
 FROM NF.Sales.Orders ord
 LEFT JOIN NF.Sales.Customer cst ON ord.CustomerId = cst.Id
 LEFT JOIN Sales.Customers cust ON cst.name = cust.contactName AND cst.frequent = cust.frequentBuyer;
